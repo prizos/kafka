@@ -24,6 +24,7 @@ import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.common.KafkaException;
+
 import org.apache.kafka.common.errors.NotEnoughReplicasException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.apache.kafka.common.errors.TopicExistsException;
@@ -85,6 +86,9 @@ public final class WorkerUtils {
      *
      * @param log               The logger to use.
      * @param bootstrapServers  The bootstrap server list.
+     * @param commonClientConf  Common client config
+     * @param adminClientConf   AdminClient config. This config has precedence over fields in
+     *                          common client config.
      * @param topics            Maps topic names to partition assignments.
      * @param failOnExisting    If true, the method will throw TopicExistsException if one or
      *                          more topics already exist. Otherwise, the existing topics are
@@ -93,12 +97,14 @@ public final class WorkerUtils {
      *                          number of partitions, the method throws RuntimeException.
      */
     public static void createTopics(
-        Logger log, String bootstrapServers,
+        Logger log, String bootstrapServers, Map<String, String> commonClientConf,
+        Map<String, String> adminClientConf,
         Map<String, NewTopic> topics, boolean failOnExisting) throws Throwable {
         // this method wraps the call to createTopics() that takes admin client, so that we can
         // unit test the functionality with MockAdminClient. The exception is caught and
         // re-thrown so that admin client is closed when the method returns.
-        try (AdminClient adminClient = createAdminClient(bootstrapServers)) {
+        try (AdminClient adminClient
+                 = createAdminClient(bootstrapServers, commonClientConf, adminClientConf)) {
             createTopics(log, adminClient, topics, failOnExisting);
         } catch (Exception e) {
             log.warn("Failed to create or verify topics {}", topics, e);
@@ -227,10 +233,19 @@ public final class WorkerUtils {
         }
     }
 
-    private static AdminClient createAdminClient(String bootstrapServers) {
+    private static AdminClient createAdminClient(
+        String bootstrapServers, Map<String, String> commonClientConf,
+        Map<String, String> adminClientConf) {
         Properties props = new Properties();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, CREATE_TOPICS_REQUEST_TIMEOUT);
+        for (Map.Entry<String, String> entry : commonClientConf.entrySet()) {
+            props.setProperty(entry.getKey(), entry.getValue());
+        }
+        // admin client conf will override same fields in common client config
+        for (Map.Entry<String, String> entry : adminClientConf.entrySet()) {
+            props.setProperty(entry.getKey(), entry.getValue());
+        }
         return AdminClient.create(props);
     }
 }
